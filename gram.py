@@ -13,7 +13,7 @@ from collections import OrderedDict
 import pickle as pickle
 import numpy as np
 
-import theano
+#import theano
 #import theano.tensor as T
 # from theano import config
 # from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams

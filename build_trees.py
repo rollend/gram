@@ -1,5 +1,5 @@
 import sys, copy
-import cPickle as pickle
+import pickle as pickle
 
 if __name__ == '__main__':
     infile = sys.argv[1]
