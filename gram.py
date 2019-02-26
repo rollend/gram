@@ -10,13 +10,15 @@
 
 import sys, random, time, argparse
 from collections import OrderedDict
-import cPickle as pickle
+import pickle as pickle
 import numpy as np
 
 import theano
-import theano.tensor as T
-from theano import config
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+#import theano.tensor as T
+# from theano import config
+# from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+
+import tensorflow as tf
 
 _TEST_RATIO = 0.2
 _VALIDATION_RATIO = 0.1
@@ -28,10 +30,10 @@ def unzip(zipped):
     return new_params
 
 def numpy_floatX(data):
-    return np.asarray(data, dtype=config.floatX)
+    return np.asarray(data, dtype='float64' ) #theano.config.floatX
 
 def get_random_weight(dim1, dim2, left=-0.1, right=0.1):
-    return np.random.uniform(left, right, (dim1, dim2)).astype(config.floatX)
+    return np.random.uniform(left, right, (dim1, dim2)).astype('float64') #theano.config.floatX
 
 def load_embedding(options):
     m = np.load(options['embFile'])
@@ -56,15 +58,15 @@ def init_params(options):
         embDimSize = options['embDimSize']
 
     params['W_attention'] = get_random_weight(embDimSize*2, attentionDimSize)
-    params['b_attention'] = np.zeros(attentionDimSize).astype(config.floatX)
-    params['v_attention'] = np.random.uniform(-0.1, 0.1, attentionDimSize).astype(config.floatX)
+    params['b_attention'] = np.zeros(attentionDimSize).astype('float64') #theano.config.floatX
+    params['v_attention'] = np.random.uniform(-0.1, 0.1, attentionDimSize).astype('float64') #theano.config.floatX
 
     params['W_gru'] = get_random_weight(embDimSize, 3*hiddenDimSize)
     params['U_gru'] = get_random_weight(hiddenDimSize, 3*hiddenDimSize)
-    params['b_gru'] = np.zeros(3 * hiddenDimSize).astype(config.floatX)
+    params['b_gru'] = np.zeros(3 * hiddenDimSize).astype('float64') #theano.config.floatX
 
     params['W_output'] = get_random_weight(hiddenDimSize, numClass)
-    params['b_output'] = np.zeros(numClass).astype(config.floatX)
+    params['b_output'] = np.zeros(numClass).astype('float64') #theano.config.floatX
 
     return params
 
@@ -75,7 +77,10 @@ def init_tparams(params):
     return tparams
 
 def dropout_layer(state_before, use_noise, trng, prob):
-    proj = T.switch(use_noise, (state_before * trng.binomial(state_before.shape, p=prob, n=1, dtype=state_before.dtype)), state_before * 0.5)
+    #proj = T.switch(use_noise, (state_before * trng.binomial(state_before.shape, p=prob, n=1, dtype=state_before.dtype)), state_before * 0.5)
+    proj = tf.where(use_noise,
+                    (state_before * trng.binomial(state_before.shape, p=prob, n=1, dtype=state_before.dtype)),
+                    state_before * 0.5)
     return proj
 
 def _slice(_x, n, dim):
@@ -302,32 +307,32 @@ def train_GRAM(
         sharedAncestors = theano.shared(ancestors, name='ancestors'+str(i))
         leavesList.append(sharedLeaves)
         ancestorsList.append(sharedAncestors)
-    
-    print 'Building the model ... ',
+
     params = init_params(options)
+    print('Building the model ... ',params)
     tparams = init_tparams(params)
     use_noise, x, y, mask, lengths, cost, cost_noreg, y_hat =  build_model(tparams, leavesList, ancestorsList, options)
     get_cost = theano.function(inputs=[x, y, mask, lengths], outputs=cost_noreg, name='get_cost')
-    print 'done!!'
-    
-    print 'Constructing the optimizer ... ',
+    print('done!!')
+
     grads = T.grad(cost, wrt=tparams.values())
+    print('Constructing the optimizer ... ',grads)
     f_grad_shared, f_update = adadelta(tparams, grads, x, y, mask, lengths, cost)
-    print 'done!!'
+    print('done!!')
 
-    print 'Loading data ... ',
     trainSet, validSet, testSet = load_data(seqFile, labelFile)
+    print('Loading data ... ',trainSet, validSet, testSet)
     n_batches = int(np.ceil(float(len(trainSet[0])) / float(batchSize)))
-    print 'done!!'
+    print('done!!')
 
-    print 'Optimization start !!'
+    print('Optimization start !!')
     bestTrainCost = 0.0
     bestValidCost = 100000.0
     bestTestCost = 0.0
     epochDuration = 0.0
     bestEpoch = 0
     logFile = outFile + '.log'
-    for epoch in xrange(max_epochs):
+    for epoch in range(max_epochs):
         iteration = 0
         costVec = []
         startTime = time.time()
@@ -342,7 +347,7 @@ def train_GRAM(
 
             if iteration % 100 == 0 and verbose:
                 buf = 'Epoch:%d, Iteration:%d/%d, Train_Cost:%f' % (epoch, iteration, n_batches, costValue)
-                print buf
+                print(buf)
             iteration += 1
         duration = time.time() - startTime
         use_noise.set_value(0.)
@@ -350,7 +355,7 @@ def train_GRAM(
         validCost = calculate_cost(get_cost, validSet, options)
         testCost = calculate_cost(get_cost, testSet, options)
         buf = 'Epoch:%d, Duration:%f, Train_Cost:%f, Valid_Cost:%f, Test_Cost:%f' % (epoch, duration, trainCost, validCost, testCost)
-        print buf
+        print(buf)
         print2file(buf, logFile)
         epochDuration += duration
         if validCost < bestValidCost:
@@ -361,7 +366,7 @@ def train_GRAM(
             tempParams = unzip(tparams)
             np.savez_compressed(outFile + '.' + str(epoch), **tempParams)
     buf = 'Best Epoch:%d, Avg_Duration:%f, Train_Cost:%f, Valid_Cost:%f, Test_Cost:%f' % (bestEpoch, epochDuration/max_epochs, bestTrainCost, bestValidCost, bestTestCost)
-    print buf
+    print(buf)
     print2file(buf, logFile)
 
 def parse_arguments(parser):
